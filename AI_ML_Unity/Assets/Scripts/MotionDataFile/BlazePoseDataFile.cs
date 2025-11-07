@@ -185,6 +185,26 @@ public class BlazePoseDataFile : ScriptableObject
                 Vector3 first = frameDict[0][0];
                 Debug.Log($"Frame 0 -> Landmark 0 = {first}");
             }
+
+            // 1107: smoothing 추가
+            foreach (var key in frameDict.Keys)
+            {
+                for (int j = 0; j < 33; j++)
+                {
+                    // 프레임별 이동 평균 적용: 흔들림 보정
+                    Vector3 avg = Vector3.zero;
+                    int count = 0;
+                    for (int f = Mathf.Max(0, key - 2); f <= Mathf.Min(frameDict.Count - 1, key + 2); f++)
+                    {
+                        avg += frameDict[f][j];
+                        count++;
+                    }
+                    avg /= count;
+                    frameDict[key][j] = avg;
+                }
+            }
+
+
         }
         catch (System.Exception e)
         {

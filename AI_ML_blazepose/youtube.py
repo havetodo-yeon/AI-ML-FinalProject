@@ -2,12 +2,12 @@ from pytubefix import YouTube
 from moviepy.editor import VideoFileClip
 import os
 
-url = "https://youtube.com/shorts/2HmCRz0oaX4?si=RITKY7ktu1UEnwo9"
+url = "https://www.youtube.com/shorts/t2_yCI_ftpI"
 
 yt = YouTube(url)
 stream = yt.streams.filter(progressive=True, file_extension='mp4').first()
 
-out_dir = "C:/Users/KDY/CAU/3-2/AIML/AI_ML_blazepose/videos"
+out_dir = "C:/Users/kdy04/CAU/3-2/AL_ML/AI_ML_FinalProject/AI_ML_blazepose/videos"
 os.makedirs(out_dir, exist_ok=True)
 video_path = stream.download(output_path=out_dir)
 

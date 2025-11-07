@@ -82,16 +82,42 @@ public class BlazeDataExtraction : RealTimeAnimation
         }
     }
 
+    //public void UpdateBlazePose(BlazePoseSkeletonBuilder skel_bp, Vector3[] currentPose)
+    //{
+    //    for (int j = 0; j < Character.Bones.Length; j++)
+    //    {
+    //        int map_i = skel_bp.boneMap[j];
+    //        //Debug.Log($" map_i : {map_i} bone : {j}");
+    //        Vector3 position_blaze_to_unity = ConvertBlazeToUnity(currentPose[j])*human_size_scale;
+    //        Character.Bones[map_i].Transform.SetPositionAndRotation(position_blaze_to_unity, Quaternion.identity);
+    //    }
+    //}
+
     public void UpdateBlazePose(BlazePoseSkeletonBuilder skel_bp, Vector3[] currentPose)
     {
-        for (int j = 0; j < Character.Bones.Length; j++)
+        if (currentPose == null || currentPose.Length == 0) return;
+        if (skel_bp == null || skel_bp.boneMap == null) return;
+
+        foreach (var kv in skel_bp.boneMap)
         {
-            int map_i = skel_bp.boneMap[j];
-            //Debug.Log($" map_i : {map_i} bone : {j}");
-            Vector3 position_blaze_to_unity = ConvertBlazeToUnity(currentPose[j])*human_size_scale;
-            Character.Bones[map_i].Transform.SetPositionAndRotation(position_blaze_to_unity, Quaternion.identity);
+            int blazeIndex = kv.Key;     // BlazePose landmark index (0~32)
+            int boneIndex = kv.Value;   // Actor.Bones 내부 인덱스
+
+            if (blazeIndex < 0 || blazeIndex >= currentPose.Length)
+                continue;
+            if (boneIndex < 0 || boneIndex >= Character.Bones.Length)
+                continue;
+
+            Vector3 bp = currentPose[blazeIndex];
+            Vector3 position_blaze_to_unity = ConvertBlazeToUnity(bp) * human_size_scale;
+
+            Character.Bones[boneIndex].Transform.position = position_blaze_to_unity;
+            // 회전까지 쓰고 싶으면 여기서 방향 벡터 계산해서 Quaternion 만들어서 SetPositionAndRotation 사용
+            // Character.Bones[boneIndex].Transform.SetPositionAndRotation(position_blaze_to_unity, Quaternion.identity);
         }
     }
+
+
     public void DrawBlazeSkel(BlazePoseSkeletonBuilder skel_bp, float boneSize, Color boneColor)
     {
         // 1. boneMap이 없거나 비어있으면 바로 리턴
@@ -167,25 +193,74 @@ public class BlazeDataExtraction : RealTimeAnimation
         }
     }
 
+    //public void EnsureCapsulesExist(BlazePoseSkeletonBuilder skel_bp)
+    //{
+    //    if (capsules == null || capsules.Count == 0)
+    //    {
+    //        Debug.Log("Capsules not assigned — building automatically.");
+    //        BuildCapsules(skel_bp);
+    //    }
+    //    else
+    //    {
+    //        Debug.Log("Using existing capsules from Inspector.");
+    //    }
+    //}
+
     public void EnsureCapsulesExist(BlazePoseSkeletonBuilder skel_bp)
     {
-        if (capsules == null || capsules.Count == 0)
+        if (capsules == null)
+            capsules = new List<GameObject>();
+
+        // 리스트 길이, null 요소까지 모두 체크해서 이상하면 재빌드
+        bool needRebuild = false;
+
+        int expectedCount = skel_bp.blazePoseBones.GetLength(0);
+
+        if (capsules.Count != expectedCount)
         {
-            Debug.Log("Capsules not assigned — building automatically.");
-            BuildCapsules(skel_bp);
+            needRebuild = true;
+        }
+        else
+        {
+            for (int i = 0; i < capsules.Count; i++)
+            {
+                if (capsules[i] == null)
+                {
+                    needRebuild = true;
+                    break;
+                }
+            }
+        }
+
+        if (needRebuild)
+        {
+            Debug.Log("Capsules are missing or invalid — rebuilding.");
+            BuildCapsules(skel_build_bp);
         }
         else
         {
             Debug.Log("Using existing capsules from Inspector.");
         }
     }
+
+
     public void UpdateCapsules(BlazePoseSkeletonBuilder skel_bp, Actor actor)
     {
-        // 본 시각화
+        // 안전장치
+        if (skel_bp == null || skel_bp.boneMap == null) return;
+        if (capsules == null || capsules.Count == 0) return;
+
         for (int i = 0; i < skel_bp.blazePoseBones.GetLength(0); i++)
         {
             int parent = skel_bp.blazePoseBones[i, 0];
             int child = skel_bp.blazePoseBones[i, 1];
+
+            // boneMap에 이 인덱스가 없으면 그냥 스킵
+            if (!skel_bp.boneMap.ContainsKey(parent) ||
+                !skel_bp.boneMap.ContainsKey(child))
+            {
+                continue;
+            }
 
             int map_parent = skel_bp.boneMap[parent];
             int map_child = skel_bp.boneMap[child];
@@ -194,15 +269,17 @@ public class BlazeDataExtraction : RealTimeAnimation
             if (child < 0 || child >= actor.Bones.Length) continue;
             if (actor.Bones[map_parent] == null || actor.Bones[map_child] == null) continue;
 
+            // 캡슐 null 체크 방어코드
+            if (i >= capsules.Count || capsules[i] == null) continue;
+
             Vector3 parentPos = actor.Bones[map_parent].Transform.position;
             Vector3 childPos = actor.Bones[map_child].Transform.position;
-
-            float length = Vector3.Distance(parentPos, childPos);
 
             bool isHand = false;
             UpdateCapsuleTransform(capsules[i], parentPos, childPos, isHand);
         }
     }
+
 
     // ============================
     // ③ 캡슐 위치/회전 업데이트
@@ -366,7 +443,7 @@ public class BlazeDataExtraction : RealTimeAnimation
             serializedObject.ApplyModifiedProperties();
 
             EditorGUILayout.Space(10);
-        
+
             // if (Utility.GUIButton("Create BlazePose Actor (33)", Color.white, Color.cyan))
             // {
             //     Target.skel_build_bp.BuildActorSkeleton();
@@ -374,20 +451,44 @@ public class BlazeDataExtraction : RealTimeAnimation
             //     Target.Character.DrawSkeleton = false;
             //     Debug.Log($"Target Character : {Target.Character.Bones.Length}");
             // }
-            
+
             // if (Utility.GUIButton("build capsules", Color.white, Color.red))
             // {
             //     Target.BuildCapsules(Target.skel_build_bp);
             // }
 
+            //// play button
+            //if (Utility.GUIButton("reset & play animation", Color.white, Color.red))
+            //{
+            //    Target.skel_build_bp.BuildMapping(Target.Character);
+            //    Target.Frame = Target.StartFrame;
+            //    Target.b_play = true;
+            //}
+
             // play button
             if (Utility.GUIButton("reset & play animation", Color.white, Color.red))
             {
-                Target.skel_build_bp.BuildMapping(Target.Character);
+                if (Target.Character != null)
+                {
+                    Animator anim = Target.Character.GetComponentInChildren<Animator>();
+
+                    if (anim != null && anim.isHuman)
+                    {
+                        // 휴머노이드 캐릭터라면 자동 Humanoid 매핑 사용
+                        Target.skel_build_bp.BuildHumanoidMapping(Target.Character, anim);
+                    }
+                    else
+                    {
+                        // 아니면 기존 procedural / custom Actor 매핑 사용
+                        Target.skel_build_bp.BuildMapping(Target.Character);
+                    }
+                }
+
                 Target.Frame = Target.StartFrame;
                 Target.b_play = true;
             }
+
         }
-        
+
     }
 }
