@@ -135,8 +135,8 @@ public class BlazePoseSkeletonBuilder : ScriptableObject
         MapBlazeToHumanoid(0, HumanBodyBones.Head);         // nose부터 head 중심부
 
         // 상체 / 팔
-        MapBlazeToHumanoid(11, HumanBodyBones.LeftShoulder);
-        MapBlazeToHumanoid(12, HumanBodyBones.RightShoulder);
+        MapBlazeToHumanoid(11, HumanBodyBones.LeftUpperArm);
+        MapBlazeToHumanoid(12, HumanBodyBones.RightUpperArm);
         MapBlazeToHumanoid(13, HumanBodyBones.LeftLowerArm);
         MapBlazeToHumanoid(14, HumanBodyBones.RightLowerArm);
         MapBlazeToHumanoid(15, HumanBodyBones.LeftHand);

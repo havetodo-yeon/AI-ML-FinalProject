@@ -1,13 +1,14 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
-using UnityEngine;
-using UnityEditor;
-using System.Text;
+//using System.Diagnostics;
 using System.IO;
-using UnityEditor.Experimental.GraphView;
+using System.Text;
 using Unity.VisualScripting;
+using UnityEditor;
+using UnityEditor.Experimental.GraphView;
 using UnityEditorInternal;
-using System;
+using UnityEngine;
 using UnityEngine.TextCore.Text;
 //using System.Diagnostics;
 
@@ -23,6 +24,7 @@ public class BlazeDataExtraction : RealTimeAnimation
     public float cube_scale = 0.02f;
     public float human_size_scale = 5f;
     public float bone_size = 0.12f;
+    public float globalYOffset = 0.0f;
 
     public GameObject capsulePrefab;     // 기본 캡슐 프리팹
     [SerializeField] 
@@ -32,7 +34,28 @@ public class BlazeDataExtraction : RealTimeAnimation
 
     private List<GameObject> jointCubes = new List<GameObject>();
     public BlazePoseSkeletonBuilder skel_build_bp;
-    
+
+    // ===== 회전 리타게팅용 캐시 =====
+    private Dictionary<int, Quaternion> boneRestRotations = new Dictionary<int, Quaternion>();
+    private Dictionary<int, Vector3> boneRestDir = new Dictionary<int, Vector3>(); // 본이 바라보는 기본 방향
+    private bool restPoseCaptured = false;
+
+    // Blaze index별로 "어느 자식을 보고 방향을 잡을지" 정의
+    // (부모 Blaze → 자식 Blaze)
+    private static readonly Dictionary<int, int> directionChildMap = new Dictionary<int, int>
+    {
+        {11, 13}, // LeftUpperArm  -> LeftElbow
+        {13, 15}, // LeftLowerArm  -> LeftWrist
+        {12, 14}, // RightUpperArm -> RightElbow
+        {14, 16}, // RightLowerArm -> RightWrist
+        {23, 25}, // LeftUpperLeg  -> LeftKnee
+        {25, 27}, // LeftLowerLeg  -> LeftAnkle
+        {24, 26}, // RightUpperLeg -> RightKnee
+        {26, 28}, // RightLowerLeg -> RightAnkle
+        {27, 31}, // LeftFoot -> LeftToes
+        {28, 32}, // RightFoot -> RightToes
+    };
+
     protected override void Setup()
     {
         _BlazeMotionData = ScriptableObject.CreateInstance<BlazePoseDataFile>();
@@ -48,7 +71,7 @@ public class BlazeDataExtraction : RealTimeAnimation
     Vector3 ConvertBlazeToUnity(Vector3 bp)
     {
         // y축 반전, z축 방향 전환 (필요 시)
-        return new Vector3(bp.x, bp.y, -bp.z);
+        return new Vector3(-bp.x, bp.y, -bp.z);
     }
     public void UpdateCubes(Transform jointRoot, Vector3[] currentPose)
     {
@@ -82,39 +105,155 @@ public class BlazeDataExtraction : RealTimeAnimation
         }
     }
 
-    //public void UpdateBlazePose(BlazePoseSkeletonBuilder skel_bp, Vector3[] currentPose)
-    //{
-    //    for (int j = 0; j < Character.Bones.Length; j++)
-    //    {
-    //        int map_i = skel_bp.boneMap[j];
-    //        //Debug.Log($" map_i : {map_i} bone : {j}");
-    //        Vector3 position_blaze_to_unity = ConvertBlazeToUnity(currentPose[j])*human_size_scale;
-    //        Character.Bones[map_i].Transform.SetPositionAndRotation(position_blaze_to_unity, Quaternion.identity);
-    //    }
-    //}
-
     public void UpdateBlazePose(BlazePoseSkeletonBuilder skel_bp, Vector3[] currentPose)
     {
         if (currentPose == null || currentPose.Length == 0) return;
-        if (skel_bp == null || skel_bp.boneMap == null) return;
+        if (skel_bp == null || skel_bp.boneMap == null || skel_bp.boneMap.Count == 0) return;
+        if (Character == null || Character.Bones == null) return;
 
+        // 첫 프레임에 아직 캡처 안 했으면 T-pose 기준 정보 저장
+        if (!restPoseCaptured)
+        {
+            CaptureRestPose(skel_bp);
+        }
+
+        // 1) BlazePose 좌표를 Unity 좌표로 모두 변환
+        Vector3[] worldJointPos = new Vector3[currentPose.Length];
+        for (int i = 0; i < currentPose.Length; i++)
+        {
+            worldJointPos[i] = ConvertBlazeToUnity(currentPose[i]) * human_size_scale;
+        }
+
+        // 2) 루트(골반) 위치를 BlazePose에 맞게 이동
+        int hipL = 23; // left hip landmark
+        int hipR = 24; // right hip landmark
+
+        Animator anim = Character.GetComponentInChildren<Animator>();
+        if (anim != null && hipL < worldJointPos.Length && hipR < worldJointPos.Length)
+        {
+            // BlazePose 기준 양쪽 엉덩이의 중간 지점
+            Vector3 hipPos = (worldJointPos[hipL] + worldJointPos[hipR]) * 0.5f;
+
+            // 전역 Y 오프셋 적용 (발 높이 보정용)
+            hipPos.y += globalYOffset;
+
+            // Humanoid Hips Transform 얻기
+            Transform hipsT = anim.GetBoneTransform(HumanBodyBones.Hips);
+            if (hipsT != null)
+            {
+                // Actor.Bones 안에서 같은 Transform을 가진 Bone 찾기
+                int hipsBoneIndex = -1;
+                for (int i = 0; i < Character.Bones.Length; i++)
+                {
+                    if (Character.Bones[i].Transform == hipsT)
+                    {
+                        hipsBoneIndex = i;
+                        break;
+                    }
+                }
+
+                if (hipsBoneIndex >= 0)
+                {
+                    Character.Bones[hipsBoneIndex].Transform.position = hipPos;
+                }
+            }
+        }
+
+
+        // 3) 각 본의 회전을 방향 벡터 기반으로 갱신
         foreach (var kv in skel_bp.boneMap)
         {
-            int blazeIndex = kv.Key;     // BlazePose landmark index (0~32)
-            int boneIndex = kv.Value;   // Actor.Bones 내부 인덱스
+            int parentBlaze = kv.Key;
+            int parentBone = kv.Value;
 
-            if (blazeIndex < 0 || blazeIndex >= currentPose.Length)
+            int childBlaze;
+            if (!directionChildMap.TryGetValue(parentBlaze, out childBlaze))
                 continue;
-            if (boneIndex < 0 || boneIndex >= Character.Bones.Length)
+
+            if (parentBlaze < 0 || parentBlaze >= worldJointPos.Length) continue;
+            if (childBlaze < 0 || childBlaze >= worldJointPos.Length) continue;
+
+            if (!boneRestRotations.ContainsKey(parentBone) ||
+                !boneRestDir.ContainsKey(parentBone))
                 continue;
 
-            Vector3 bp = currentPose[blazeIndex];
-            Vector3 position_blaze_to_unity = ConvertBlazeToUnity(bp) * human_size_scale;
+            // BlazePose 기준 현재 방향 (부모 -> 자식)
+            Vector3 targetDir = worldJointPos[childBlaze] - worldJointPos[parentBlaze];
+            if (targetDir.sqrMagnitude < 1e-6f) continue;
+            targetDir.Normalize();
 
-            Character.Bones[boneIndex].Transform.position = position_blaze_to_unity;
-            // 회전까지 쓰고 싶으면 여기서 방향 벡터 계산해서 Quaternion 만들어서 SetPositionAndRotation 사용
-            // Character.Bones[boneIndex].Transform.SetPositionAndRotation(position_blaze_to_unity, Quaternion.identity);
+            // 캐릭터 기본 포즈에서의 방향 / 회전
+            Vector3 restDir = boneRestDir[parentBone];
+            Quaternion restRot = boneRestRotations[parentBone];
+
+            // 기본 방향 → 현재 방향으로 회전 델타 계산
+            Quaternion delta = Quaternion.FromToRotation(restDir, targetDir);
+
+            // 최종 회전 = 델타 * 기본 회전
+            Character.Bones[parentBone].Transform.rotation = delta * restRot;
         }
+
+        // ====== 몸통(Spine/Chest) 회전 보정 ======
+        Animator animTorso = Character.GetComponentInChildren<Animator>();
+        if (animTorso != null)
+        {
+            Transform hips = animTorso.GetBoneTransform(HumanBodyBones.Hips);
+            Transform chest = animTorso.GetBoneTransform(HumanBodyBones.Chest);
+            if (hips != null && chest != null)
+            {
+                Vector3 leftShoulder = ConvertBlazeToUnity(currentPose[11]) * human_size_scale;
+                Vector3 rightShoulder = ConvertBlazeToUnity(currentPose[12]) * human_size_scale;
+                Vector3 leftHip = ConvertBlazeToUnity(currentPose[23]) * human_size_scale;
+                Vector3 rightHip = ConvertBlazeToUnity(currentPose[24]) * human_size_scale;
+
+                Vector3 shoulderCenter = (leftShoulder + rightShoulder) * 0.5f;
+                Vector3 hipCenter = (leftHip + rightHip) * 0.5f;
+
+                Vector3 torsoDir = (shoulderCenter - hipCenter).normalized;     // 몸통의 위쪽 방향
+                Vector3 rightDir = (rightShoulder - leftShoulder).normalized;   // 몸통의 오른쪽 방향
+                Vector3 forwardDir = Vector3.Cross(rightDir, torsoDir).normalized;  // 정면 방향
+
+                if (forwardDir.sqrMagnitude > 0.001f)
+                {
+                    Quaternion targetRot = Quaternion.LookRotation(forwardDir, torsoDir);
+
+                    // 골반도 같은 방향으로 회전
+                    hips.rotation = targetRot;
+
+                    // Chest는 골반보다 조금 더 많이 따라가게 하고 싶으면 Slerp 써도 되고,
+                    // 그냥 똑같이 맞추고 싶으면 바로 targetRot 대입해도 된다.
+                    chest.rotation = Quaternion.Slerp(chest.rotation, targetRot, 0.7f);
+                    // chest.rotation = targetRot;  // 이렇게 해도 OK
+                }
+
+            }
+
+            // ====== 머리(Head / Neck) 회전 보정 ======
+            Transform head = animTorso.GetBoneTransform(HumanBodyBones.Head);
+            Transform neck = animTorso.GetBoneTransform(HumanBodyBones.Neck);
+
+            if (head != null)
+            {
+                Vector3 leftShoulder = ConvertBlazeToUnity(currentPose[11]) * human_size_scale;
+                Vector3 rightShoulder = ConvertBlazeToUnity(currentPose[12]) * human_size_scale;
+                Vector3 nose = ConvertBlazeToUnity(currentPose[0]) * human_size_scale;
+
+                Vector3 shoulderCenter = (leftShoulder + rightShoulder) * 0.5f;
+                Vector3 headDir = (nose - shoulderCenter).normalized;       // 얼굴이 바라보는 방향
+                Vector3 torsoUp = Vector3.up;                           // 위쪽은 월드 기준으로 고정 (혹은 torsoDir 써도 됨)
+
+                if (headDir.sqrMagnitude > 0.001f)
+                {
+                    Quaternion headRot = Quaternion.LookRotation(headDir, torsoUp);
+                    head.rotation = headRot;
+
+                    if (neck != null)
+                        neck.rotation = Quaternion.Slerp(neck.rotation, headRot, 0.5f);
+                }
+            }
+        }
+
+
     }
 
 
@@ -306,6 +445,70 @@ public class BlazeDataExtraction : RealTimeAnimation
         }
     }
 
+    /// <summary>
+    /// 캐릭터 T-pose 상태에서
+    /// - 각 본의 기본 회전
+    /// - 각 본이 바라보는 기본 방향(부모→자식)
+    /// 을 한 번만 저장
+    /// </summary>
+    public void CaptureRestPose(BlazePoseSkeletonBuilder skel_bp)
+    {
+        boneRestRotations.Clear();
+        boneRestDir.Clear();
+        restPoseCaptured = false;
+
+        if (Character == null || Character.Bones == null)
+        {
+            Debug.LogWarning("[BlazeDataExtraction] Character is null, cannot capture rest pose.");
+            return;
+        }
+
+        if (skel_bp == null || skel_bp.boneMap == null || skel_bp.boneMap.Count == 0)
+        {
+            Debug.LogWarning("[BlazeDataExtraction] skel_bp / boneMap not ready.");
+            return;
+        }
+
+        // 1) 각 본의 월드 기준 기본 회전 저장
+        foreach (var kv in skel_bp.boneMap)
+        {
+            int boneIndex = kv.Value;
+            if (boneIndex < 0 || boneIndex >= Character.Bones.Length) continue;
+
+            Transform t = Character.Bones[boneIndex].Transform;
+            boneRestRotations[boneIndex] = t.rotation;
+        }
+
+        // 2) 각 본이 바라보는 "주 방향" 저장 (우리가 정의한 directionChildMap 기준)
+        foreach (var kv in skel_bp.boneMap)
+        {
+            int parentBlaze = kv.Key;
+            int parentBone = kv.Value;
+
+            int childBlaze;
+            if (!directionChildMap.TryGetValue(parentBlaze, out childBlaze))
+                continue; // 이 Blaze joint는 방향을 정의하지 않음
+
+            if (!skel_bp.boneMap.ContainsKey(childBlaze))
+                continue; // 자식 Blaze가 매핑돼 있지 않으면 스킵
+
+            int childBone = skel_bp.boneMap[childBlaze];
+
+            Transform tParent = Character.Bones[parentBone].Transform;
+            Transform tChild = Character.Bones[childBone].Transform;
+
+            Vector3 dir = tChild.position - tParent.position;
+            if (dir.sqrMagnitude < 1e-6f) continue;
+            dir.Normalize();
+
+            boneRestDir[parentBone] = dir;
+        }
+
+
+        restPoseCaptured = true;
+        Debug.Log("[BlazeDataExtraction] Rest pose captured.");
+    }
+
 
     protected override void Feed()
     {
@@ -433,7 +636,9 @@ public class BlazeDataExtraction : RealTimeAnimation
             
             Target.capsuleRadius = EditorGUILayout.FloatField("bone_size", Target.capsuleRadius);
             Target.human_size_scale = EditorGUILayout.FloatField("human_scale", Target.human_size_scale);
-            
+
+            Target.globalYOffset = EditorGUILayout.FloatField("global Y offset", Target.globalYOffset);
+
             // capsule prefab field
             Target.capsulePrefab = (GameObject)EditorGUILayout.ObjectField("Capsule Prefab", Target.capsulePrefab, typeof(GameObject), true);
 
