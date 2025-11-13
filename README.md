@@ -1,4 +1,4 @@
-# AI-ML-FinalProject
+# AI-ML-Assignment02
 인공지능과 머신러닝 기말 프로젝트
 
 ## 기본 요구사항
