@@ -500,22 +500,24 @@ Material:
     - _Color: {r: 1, g: 0.647, b: 0, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
   m_BuildTextureStacks: []
+--- !u!114 &135940290
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0eeb1451095266b548092acaea9edccc, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  actor: {fileID: 0}
 --- !u!1 &137260954 stripped
 GameObject:
   m_CorrespondingSourceObject: {fileID: 4754002873865851366, guid: 6fec8767bd74767a7abf6b4fb8f81c34, type: 3}
   m_PrefabInstance: {fileID: 4754002873729924732}
   m_PrefabAsset: {fileID: 0}
---- !u!114 &137260955 stripped
-MonoBehaviour:
-  m_CorrespondingSourceObject: {fileID: 4754002873865851367, guid: 6fec8767bd74767a7abf6b4fb8f81c34, type: 3}
-  m_PrefabInstance: {fileID: 4754002873729924732}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 137260954}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 3052bc304c5402b49830d82ea58eadaa, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
 --- !u!4 &171457468 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: -8725540660313892278, guid: 9baeba9b9ea4f014abf6060d6109da45, type: 3}
@@ -4615,19 +4617,6 @@ MeshFilter:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1483580761}
   m_Mesh: {fileID: 10208, guid: 0000000000000000e000000000000000, type: 0}
---- !u!114 &1486597051
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 0eeb1451095266b548092acaea9edccc, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  actor: {fileID: 0}
 --- !u!1 &1517216286
 GameObject:
   m_ObjectHideFlags: 0
@@ -4809,70 +4798,6 @@ GameObject:
   m_CorrespondingSourceObject: {fileID: 9219599618710437054, guid: b24aa8dc96b9b9b4d870275cd108c7ba, type: 3}
   m_PrefabInstance: {fileID: 1060338858}
   m_PrefabAsset: {fileID: 0}
---- !u!114 &1535732137
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1535732133}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1183a6e6df942848b97484b3120c4abb, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  _actor: {fileID: 0}
-  Frame: 1
-  TotalFrames: 0
-  play_data: 0
-  b_data: 0
-  Framerate: 0
-  b_play: 1
-  StartFrame: 1
-  _BlazeMotionData: {fileID: 0}
-  Character: {fileID: 137260955}
-  jointRoot: {fileID: 1736123573}
-  cube_scale: 0.02
-  human_size_scale: 5
-  bone_size: 0.12
-  globalYOffset: 0
-  capsulePrefab: {fileID: 1406946518}
-  capsules:
-  - {fileID: 443955997}
-  - {fileID: 37192405}
-  - {fileID: 2053741713}
-  - {fileID: 299566866}
-  - {fileID: 1289392238}
-  - {fileID: 639358894}
-  - {fileID: 459149544}
-  - {fileID: 915241525}
-  - {fileID: 732442731}
-  - {fileID: 2094539777}
-  - {fileID: 1517216286}
-  - {fileID: 696682444}
-  - {fileID: 2030425165}
-  - {fileID: 1203516831}
-  - {fileID: 1854120713}
-  - {fileID: 61501246}
-  - {fileID: 867284683}
-  - {fileID: 1874384331}
-  - {fileID: 2072172746}
-  - {fileID: 1917340791}
-  - {fileID: 646925148}
-  - {fileID: 1451771101}
-  - {fileID: 2018390445}
-  - {fileID: 1922355450}
-  - {fileID: 1206317618}
-  - {fileID: 1950042731}
-  - {fileID: 1168764730}
-  - {fileID: 1483580761}
-  - {fileID: 1621780614}
-  - {fileID: 324296426}
-  - {fileID: 1822304502}
-  - {fileID: 2080939764}
-  - {fileID: 1367626031}
-  capsuleRadius: 0.15
-  skel_build_bp: {fileID: 1486597051}
 --- !u!114 &1535732139
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -4899,11 +4824,10 @@ MonoBehaviour:
   cube_scale: 0.02
   human_size_scale: 5
   bone_size: 0.12
-  globalYOffset: 0
   capsulePrefab: {fileID: 1406946518}
   capsules: []
   capsuleRadius: 0.15
-  skel_build_bp: {fileID: 1884421788}
+  skel_build_bp: {fileID: 135940290}
 --- !u!4 &1546538723 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: -870823317777057635, guid: 9baeba9b9ea4f014abf6060d6109da45, type: 3}
@@ -6141,11 +6065,6 @@ Material:
     - _Color: {r: 1, g: 0.647, b: 0, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
   m_BuildTextureStacks: []
---- !u!4 &1736123573 stripped
-Transform:
-  m_CorrespondingSourceObject: {fileID: 426042988918644418, guid: d4b8329eec9033444b0d4ca55879a845, type: 3}
-  m_PrefabInstance: {fileID: 426042988338199159}
-  m_PrefabAsset: {fileID: 0}
 --- !u!21 &1774982738
 Material:
   serializedVersion: 8
@@ -6758,19 +6677,6 @@ MeshFilter:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1874384331}
   m_Mesh: {fileID: 10208, guid: 0000000000000000e000000000000000, type: 0}
---- !u!114 &1884421788
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 0eeb1451095266b548092acaea9edccc, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  actor: {fileID: 0}
 --- !u!4 &1891614744 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 8044669281949152778, guid: 9baeba9b9ea4f014abf6060d6109da45, type: 3}
