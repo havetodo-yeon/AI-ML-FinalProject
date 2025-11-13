@@ -24,7 +24,6 @@ public class BlazeDataExtraction : RealTimeAnimation
     public float cube_scale = 0.02f;
     public float human_size_scale = 5f;
     public float bone_size = 0.12f;
-    public float globalYOffset = 0.0f;
 
     public GameObject capsulePrefab;     // 기본 캡슐 프리팹
     [SerializeField] 
@@ -35,7 +34,7 @@ public class BlazeDataExtraction : RealTimeAnimation
     private List<GameObject> jointCubes = new List<GameObject>();
     public BlazePoseSkeletonBuilder skel_build_bp;
 
-    // ===== 회전 리타게팅용 캐시 =====
+    // 회전 리타게팅용 캐시
     private Dictionary<int, Quaternion> boneRestRotations = new Dictionary<int, Quaternion>();
     private Dictionary<int, Vector3> boneRestDir = new Dictionary<int, Vector3>(); // 본이 바라보는 기본 방향
     private bool restPoseCaptured = false;
@@ -134,9 +133,6 @@ public class BlazeDataExtraction : RealTimeAnimation
             // BlazePose 기준 양쪽 엉덩이의 중간 지점
             Vector3 hipPos = (worldJointPos[hipL] + worldJointPos[hipR]) * 0.5f;
 
-            // 전역 Y 오프셋 적용 (발 높이 보정용)
-            hipPos.y += globalYOffset;
-
             // Humanoid Hips Transform 얻기
             Transform hipsT = anim.GetBoneTransform(HumanBodyBones.Hips);
             if (hipsT != null)
@@ -186,14 +182,14 @@ public class BlazeDataExtraction : RealTimeAnimation
             Vector3 restDir = boneRestDir[parentBone];
             Quaternion restRot = boneRestRotations[parentBone];
 
-            // 기본 방향 → 현재 방향으로 회전 델타 계산
+            // 기본 방향 -> 현재 방향으로 회전 델타 계산
             Quaternion delta = Quaternion.FromToRotation(restDir, targetDir);
 
             // 최종 회전 = 델타 * 기본 회전
             Character.Bones[parentBone].Transform.rotation = delta * restRot;
         }
 
-        // ====== 몸통(Spine/Chest) 회전 보정 ======
+        // 몸통(Spine/Chest) 회전 보정
         Animator animTorso = Character.GetComponentInChildren<Animator>();
         if (animTorso != null)
         {
@@ -220,15 +216,13 @@ public class BlazeDataExtraction : RealTimeAnimation
                     // 골반도 같은 방향으로 회전
                     hips.rotation = targetRot;
 
-                    // Chest는 골반보다 조금 더 많이 따라가게 하고 싶으면 Slerp 써도 되고,
-                    // 그냥 똑같이 맞추고 싶으면 바로 targetRot 대입해도 된다.
                     chest.rotation = Quaternion.Slerp(chest.rotation, targetRot, 0.7f);
-                    // chest.rotation = targetRot;  // 이렇게 해도 OK
+                    // chest.rotation = targetRot;
                 }
 
             }
 
-            // ====== 머리(Head / Neck) 회전 보정 ======
+            // 머리(Head / Neck) 회전 보정
             Transform head = animTorso.GetBoneTransform(HumanBodyBones.Head);
             Transform neck = animTorso.GetBoneTransform(HumanBodyBones.Neck);
 
@@ -240,7 +234,7 @@ public class BlazeDataExtraction : RealTimeAnimation
 
                 Vector3 shoulderCenter = (leftShoulder + rightShoulder) * 0.5f;
                 Vector3 headDir = (nose - shoulderCenter).normalized;       // 얼굴이 바라보는 방향
-                Vector3 torsoUp = Vector3.up;                           // 위쪽은 월드 기준으로 고정 (혹은 torsoDir 써도 됨)
+                Vector3 torsoUp = Vector3.up;                           // 위쪽은 월드 기준으로 고정
 
                 if (headDir.sqrMagnitude > 0.001f)
                 {
@@ -394,7 +388,7 @@ public class BlazeDataExtraction : RealTimeAnimation
             int parent = skel_bp.blazePoseBones[i, 0];
             int child = skel_bp.blazePoseBones[i, 1];
 
-            // boneMap에 이 인덱스가 없으면 그냥 스킵
+            // boneMap에 인덱스가 없으면 그냥 스킵
             if (!skel_bp.boneMap.ContainsKey(parent) ||
                 !skel_bp.boneMap.ContainsKey(child))
             {
@@ -479,7 +473,7 @@ public class BlazeDataExtraction : RealTimeAnimation
             boneRestRotations[boneIndex] = t.rotation;
         }
 
-        // 2) 각 본이 바라보는 "주 방향" 저장 (우리가 정의한 directionChildMap 기준)
+        // 2) 각 본이 바라보는 방향 저장
         foreach (var kv in skel_bp.boneMap)
         {
             int parentBlaze = kv.Key;
@@ -487,7 +481,7 @@ public class BlazeDataExtraction : RealTimeAnimation
 
             int childBlaze;
             if (!directionChildMap.TryGetValue(parentBlaze, out childBlaze))
-                continue; // 이 Blaze joint는 방향을 정의하지 않음
+                continue; // Blaze joint는 방향을 정의X
 
             if (!skel_bp.boneMap.ContainsKey(childBlaze))
                 continue; // 자식 Blaze가 매핑돼 있지 않으면 스킵
@@ -637,8 +631,6 @@ public class BlazeDataExtraction : RealTimeAnimation
             Target.capsuleRadius = EditorGUILayout.FloatField("bone_size", Target.capsuleRadius);
             Target.human_size_scale = EditorGUILayout.FloatField("human_scale", Target.human_size_scale);
 
-            Target.globalYOffset = EditorGUILayout.FloatField("global Y offset", Target.globalYOffset);
-
             // capsule prefab field
             Target.capsulePrefab = (GameObject)EditorGUILayout.ObjectField("Capsule Prefab", Target.capsulePrefab, typeof(GameObject), true);
 
@@ -684,7 +676,7 @@ public class BlazeDataExtraction : RealTimeAnimation
                     }
                     else
                     {
-                        // 아니면 기존 procedural / custom Actor 매핑 사용
+                        // 아니면 기존 매핑 사용
                         Target.skel_build_bp.BuildMapping(Target.Character);
                     }
                 }

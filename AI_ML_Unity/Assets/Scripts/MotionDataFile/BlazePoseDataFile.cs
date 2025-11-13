@@ -186,7 +186,7 @@ public class BlazePoseDataFile : ScriptableObject
                 Debug.Log($"Frame 0 -> Landmark 0 = {first}");
             }
 
-            // 1107: smoothing 추가
+            // smoothing 추가
             foreach (var key in frameDict.Keys)
             {
                 for (int j = 0; j < 33; j++)

@@ -127,12 +127,11 @@ public class BlazePoseSkeletonBuilder : ScriptableObject
             }
 
             boneMap[blazeIndex] = boneIndex;
-            //Debug.Log($"Blaze {blazeIndex} -> {unityBone} -> Actor bone index {boneIndex}");
         }
 
         // 실제 매핑 규칙: BlazePose index → Humanoid 본 
         // 머리
-        MapBlazeToHumanoid(0, HumanBodyBones.Head);         // nose부터 head 중심부
+        MapBlazeToHumanoid(0, HumanBodyBones.Head);
 
         // 상체 / 팔
         MapBlazeToHumanoid(11, HumanBodyBones.LeftUpperArm);
@@ -152,9 +151,10 @@ public class BlazePoseSkeletonBuilder : ScriptableObject
         MapBlazeToHumanoid(31, HumanBodyBones.LeftToes);
         MapBlazeToHumanoid(32, HumanBodyBones.RightToes);
 
-        // 필요하면 가슴/목/척추 쪽도 머리 기준으로 더 매핑 가능 (예: nose → Spine, Chest 등)
+        // 가슴/목/척추 쪽도 머리 기준으로 더 매핑 가능 (예: nose → Spine, Chest 등)
+        // -> 보정으로 처리
 
-        Debug.Log($"✅ Humanoid bone mapping table built: {boneMap.Count} entries");
+        Debug.Log($"Humanoid bone mapping table built: {boneMap.Count} entries");
     }
 
 
