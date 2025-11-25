@@ -8,7 +8,7 @@ BlazePose + Unity (~11/14)
 
 사용한 영상: [이달의 신곡] Hearts2Hearts - Style🎀 포인트 안무 거울모드
 https://www.youtube.com/shorts/t2_yCI_ftpI   
-시연 영상: [링크 눌러주세요](https://file.notion.so/f/f/b1477d4e-7ebb-4170-aff4-98d41410766e/b6cba4a6-6025-4df7-9bd6-ca2c6bfa7f60/%ED%99%94%EB%A9%B4_%EB%85%B9%ED%99%94_%EC%A4%91_2025-11-12_010140.mp4?table=block&id=2a8ad6eb-216e-8097-ab78-d4bc14d6d1ca&spaceId=b1477d4e-7ebb-4170-aff4-98d41410766e&expirationTimestamp=1764100800000&signature=oUPZyZWznTb8r4D90xn1a3a5ZMWVO1YbtiLdZtuNPok&downloadName=%ED%99%94%EB%A9%B4+%EB%85%B9%ED%99%94+%EC%A4%91+2025-11-12+010140.mp4)**
+**시연 영상**: [링크 눌러주세요](https://file.notion.so/f/f/b1477d4e-7ebb-4170-aff4-98d41410766e/b6cba4a6-6025-4df7-9bd6-ca2c6bfa7f60/%ED%99%94%EB%A9%B4_%EB%85%B9%ED%99%94_%EC%A4%91_2025-11-12_010140.mp4?table=block&id=2a8ad6eb-216e-8097-ab78-d4bc14d6d1ca&spaceId=b1477d4e-7ebb-4170-aff4-98d41410766e&expirationTimestamp=1764100800000&signature=oUPZyZWznTb8r4D90xn1a3a5ZMWVO1YbtiLdZtuNPok&downloadName=%ED%99%94%EB%A9%B4+%EB%85%B9%ED%99%94+%EC%A4%91+2025-11-12+010140.mp4)
 
 ### 1. 프로젝트 개요
 
