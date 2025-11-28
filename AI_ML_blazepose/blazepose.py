@@ -21,7 +21,7 @@ pose = mp_pose.Pose(
 
 # 🔹 선택: 0 = 웹캠 / 파일 = 동영상
 use_webcam = False
-name = "Style"
+name = "style"
 video_path = f"videos/{name}.mp4"
 
 if use_webcam:

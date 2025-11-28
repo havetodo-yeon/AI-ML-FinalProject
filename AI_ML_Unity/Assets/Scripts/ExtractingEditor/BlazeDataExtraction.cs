@@ -10,14 +10,15 @@ using UnityEditor.Experimental.GraphView;
 using UnityEditorInternal;
 using UnityEngine;
 using UnityEngine.TextCore.Text;
-//using System.Diagnostics;
 
 public class BlazeDataExtraction : RealTimeAnimation
 {
     public bool b_play = false;
     public int StartFrame = 1;
     public BlazePoseDataFile _BlazeMotionData;
-    public Actor Character;
+
+    // Actor 배열로 변경: 한 BlazePose 모션 여러 Actor에 적용
+    public List<Actor> Characters = new List<Actor>();
 
     // joint root cubes
     public Transform jointRoot;
@@ -38,6 +39,13 @@ public class BlazeDataExtraction : RealTimeAnimation
     private Dictionary<int, Quaternion> boneRestRotations = new Dictionary<int, Quaternion>();
     private Dictionary<int, Vector3> boneRestDir = new Dictionary<int, Vector3>(); // 본이 바라보는 기본 방향
     private bool restPoseCaptured = false;
+
+    // 각 Actor가 씬에서 처음 서 있던 hips 위치
+    private Dictionary<Actor, Vector3> actorBaseHipPositions = new Dictionary<Actor, Vector3>();
+
+    // BlazePose 기준 pelvis(hips) 첫 프레임 위치 (카메라 좌표 -> Unity로 변환된 값)
+    private bool basePelvisInitialized = false;
+    private Vector3 basePelvisPosBP = Vector3.zero;
 
     // Blaze index별로 "어느 자식을 보고 방향을 잡을지" 정의
     // (부모 Blaze → 자식 Blaze)
@@ -104,16 +112,16 @@ public class BlazeDataExtraction : RealTimeAnimation
         }
     }
 
-    public void UpdateBlazePose(BlazePoseSkeletonBuilder skel_bp, Vector3[] currentPose)
+    public void UpdateBlazePose(BlazePoseSkeletonBuilder skel_bp, Actor actor, Vector3[] currentPose)
     {
         if (currentPose == null || currentPose.Length == 0) return;
         if (skel_bp == null || skel_bp.boneMap == null || skel_bp.boneMap.Count == 0) return;
-        if (Character == null || Character.Bones == null) return;
+        if (actor == null || actor.Bones == null) return;
 
         // 첫 프레임에 아직 캡처 안 했으면 T-pose 기준 정보 저장
         if (!restPoseCaptured)
         {
-            CaptureRestPose(skel_bp);
+            CaptureRestPose(skel_bp, actor);
         }
 
         // 1) BlazePose 좌표를 Unity 좌표로 모두 변환
@@ -123,35 +131,47 @@ public class BlazeDataExtraction : RealTimeAnimation
             worldJointPos[i] = ConvertBlazeToUnity(currentPose[i]) * human_size_scale;
         }
 
-        // 2) 루트(골반) 위치를 BlazePose에 맞게 이동
+        // 2) Pelvis 기준 상대 좌표 계산
         int hipL = 23; // left hip landmark
         int hipR = 24; // right hip landmark
 
-        Animator anim = Character.GetComponentInChildren<Animator>();
-        if (anim != null && hipL < worldJointPos.Length && hipR < worldJointPos.Length)
-        {
-            // BlazePose 기준 양쪽 엉덩이의 중간 지점
-            Vector3 hipPos = (worldJointPos[hipL] + worldJointPos[hipR]) * 0.5f;
+        // 현재 프레임 pelvis 중심 (BlazePose -> Unity 좌표)
+        Vector3 hipCenter = (worldJointPos[hipL] + worldJointPos[hipR]) * 0.5f;
 
-            // Humanoid Hips Transform 얻기
+        // 첫 프레임의 pelvis 위치를 기준점으로 저장
+        if (!basePelvisInitialized)
+        {
+            basePelvisInitialized = true;
+            basePelvisPosBP = hipCenter;
+        }
+
+        // 모든 joint를 "초기 pelvis" 기준 상대 좌표로 변환
+        Vector3[] localJointPos = new Vector3[currentPose.Length];
+        for (int i = 0; i < currentPose.Length; i++)
+        {
+            localJointPos[i] = worldJointPos[i] - basePelvisPosBP;
+        }
+
+        // 씬에서의 실제 루트(hips) 위치 결정 
+        // BlazePose 상에서의 pelvis 이동량 (첫 프레임 기준)
+        Vector3 hipDelta = hipCenter - basePelvisPosBP;
+
+        Animator anim = actor.GetComponentInChildren<Animator>();
+        if (anim != null)
+        {
             Transform hipsT = anim.GetBoneTransform(HumanBodyBones.Hips);
             if (hipsT != null)
             {
-                // Actor.Bones 안에서 같은 Transform을 가진 Bone 찾기
-                int hipsBoneIndex = -1;
-                for (int i = 0; i < Character.Bones.Length; i++)
+                // 이 Actor가 씬에서 처음 서 있던 hips 위치 저장
+                Vector3 baseWorldPos;
+                if (!actorBaseHipPositions.TryGetValue(actor, out baseWorldPos))
                 {
-                    if (Character.Bones[i].Transform == hipsT)
-                    {
-                        hipsBoneIndex = i;
-                        break;
-                    }
+                    baseWorldPos = hipsT.position;
+                    actorBaseHipPositions[actor] = baseWorldPos;
                 }
 
-                if (hipsBoneIndex >= 0)
-                {
-                    Character.Bones[hipsBoneIndex].Transform.position = hipPos;
-                }
+                // 캐릭터 = "처음 서 있던 위치" + "BlazePose pelvis 이동량"
+                hipsT.position = baseWorldPos + hipDelta;
             }
         }
 
@@ -173,8 +193,8 @@ public class BlazeDataExtraction : RealTimeAnimation
                 !boneRestDir.ContainsKey(parentBone))
                 continue;
 
-            // BlazePose 기준 현재 방향 (부모 -> 자식)
-            Vector3 targetDir = worldJointPos[childBlaze] - worldJointPos[parentBlaze];
+            // BlazePose 기준 현재 방향 (부모 -> 자식), pelvis 기준 로컬 좌표 사용
+            Vector3 targetDir = localJointPos[childBlaze] - localJointPos[parentBlaze];
             if (targetDir.sqrMagnitude < 1e-6f) continue;
             targetDir.Normalize();
 
@@ -186,26 +206,26 @@ public class BlazeDataExtraction : RealTimeAnimation
             Quaternion delta = Quaternion.FromToRotation(restDir, targetDir);
 
             // 최종 회전 = 델타 * 기본 회전
-            Character.Bones[parentBone].Transform.rotation = delta * restRot;
+            actor.Bones[parentBone].Transform.rotation = delta * restRot;
         }
 
         // 몸통(Spine/Chest) 회전 보정
-        Animator animTorso = Character.GetComponentInChildren<Animator>();
+        Animator animTorso = actor.GetComponentInChildren<Animator>();
         if (animTorso != null)
         {
             Transform hips = animTorso.GetBoneTransform(HumanBodyBones.Hips);
             Transform chest = animTorso.GetBoneTransform(HumanBodyBones.Chest);
             if (hips != null && chest != null)
             {
-                Vector3 leftShoulder = ConvertBlazeToUnity(currentPose[11]) * human_size_scale;
-                Vector3 rightShoulder = ConvertBlazeToUnity(currentPose[12]) * human_size_scale;
-                Vector3 leftHip = ConvertBlazeToUnity(currentPose[23]) * human_size_scale;
-                Vector3 rightHip = ConvertBlazeToUnity(currentPose[24]) * human_size_scale;
+                Vector3 leftShoulder = localJointPos[11];
+                Vector3 rightShoulder = localJointPos[12];
+                Vector3 leftHip = localJointPos[23];
+                Vector3 rightHip = localJointPos[24];
 
                 Vector3 shoulderCenter = (leftShoulder + rightShoulder) * 0.5f;
-                Vector3 hipCenter = (leftHip + rightHip) * 0.5f;
+                Vector3 hipCenterLocal = (leftHip + rightHip) * 0.5f;
 
-                Vector3 torsoDir = (shoulderCenter - hipCenter).normalized;     // 몸통의 위쪽 방향
+                Vector3 torsoDir = (shoulderCenter - hipCenterLocal).normalized;     // 몸통의 위쪽 방향
                 Vector3 rightDir = (rightShoulder - leftShoulder).normalized;   // 몸통의 오른쪽 방향
                 Vector3 forwardDir = Vector3.Cross(rightDir, torsoDir).normalized;  // 정면 방향
 
@@ -228,13 +248,13 @@ public class BlazeDataExtraction : RealTimeAnimation
 
             if (head != null)
             {
-                Vector3 leftShoulder = ConvertBlazeToUnity(currentPose[11]) * human_size_scale;
-                Vector3 rightShoulder = ConvertBlazeToUnity(currentPose[12]) * human_size_scale;
-                Vector3 nose = ConvertBlazeToUnity(currentPose[0]) * human_size_scale;
+                Vector3 leftShoulder = localJointPos[11];
+                Vector3 rightShoulder = localJointPos[12];
+                Vector3 nose = localJointPos[0];
 
                 Vector3 shoulderCenter = (leftShoulder + rightShoulder) * 0.5f;
                 Vector3 headDir = (nose - shoulderCenter).normalized;       // 얼굴이 바라보는 방향
-                Vector3 torsoUp = Vector3.up;                           // 위쪽은 월드 기준으로 고정
+                Vector3 torsoUp = Vector3.up;                           // 위쪽 방향은 몸통 방향을 재활용하는 게 더 자연스러움
 
                 if (headDir.sqrMagnitude > 0.001f)
                 {
@@ -267,6 +287,14 @@ public class BlazeDataExtraction : RealTimeAnimation
             return;
         }
 
+        // 대표 Actor 선택
+        Actor primary = (Characters != null && Characters.Count > 0) ? Characters[0] : null;
+        if (primary == null || primary.Bones == null)
+        {
+            Debug.LogWarning("[DrawBlazeSkel] No primary Actor to draw.");
+            return;
+        }
+
         UltiDraw.Begin();
 
         for (int i = 0; i < skel_bp.blazePoseBones.GetLength(0); i++)
@@ -277,16 +305,14 @@ public class BlazeDataExtraction : RealTimeAnimation
             int map_parent = skel_bp.boneMap[parent];
             int map_child = skel_bp.boneMap[child];
 
-            if (parent < 0 || parent >= Character.Bones.Length) continue;
-            if (child < 0 || child >= Character.Bones.Length) continue;
-            if (Character.Bones[map_parent] == null || Character.Bones[map_child] == null) continue;
+            if (parent < 0 || parent >= primary.Bones.Length) continue;
+            if (child < 0 || child >= primary.Bones.Length) continue;
+            if (primary.Bones[map_parent] == null || primary.Bones[map_child] == null) continue;
 
-            Vector3 parentPos = Character.Bones[map_parent].Transform.position;
-            Vector3 childPos = Character.Bones[map_child].Transform.position;
+            Vector3 parentPos = primary.Bones[map_parent].Transform.position;
+            Vector3 childPos = primary.Bones[map_child].Transform.position;
 
             float length = Vector3.Distance(parentPos, childPos);
-
-            //UltiDraw.DrawLine(parentPos, childPos,boneSize, boneColor);
 
             UltiDraw.DrawBone(
                 parentPos,
@@ -294,12 +320,12 @@ public class BlazeDataExtraction : RealTimeAnimation
                 12.5f * boneSize * length,
                 length,
                 Color.grey
-            ); // boneColor.Transparent(1f)
+            );
         }
 
         UltiDraw.End();
     }
-    
+
     // Capsule visualization
     public void BuildCapsules(BlazePoseSkeletonBuilder skel_bp)
     {
@@ -325,19 +351,6 @@ public class BlazeDataExtraction : RealTimeAnimation
             capsules.Add(capsule);
         }
     }
-
-    //public void EnsureCapsulesExist(BlazePoseSkeletonBuilder skel_bp)
-    //{
-    //    if (capsules == null || capsules.Count == 0)
-    //    {
-    //        Debug.Log("Capsules not assigned — building automatically.");
-    //        BuildCapsules(skel_bp);
-    //    }
-    //    else
-    //    {
-    //        Debug.Log("Using existing capsules from Inspector.");
-    //    }
-    //}
 
     public void EnsureCapsulesExist(BlazePoseSkeletonBuilder skel_bp)
     {
@@ -445,15 +458,15 @@ public class BlazeDataExtraction : RealTimeAnimation
     /// - 각 본이 바라보는 기본 방향(부모→자식)
     /// 을 한 번만 저장
     /// </summary>
-    public void CaptureRestPose(BlazePoseSkeletonBuilder skel_bp)
+    public void CaptureRestPose(BlazePoseSkeletonBuilder skel_bp, Actor actor)
     {
         boneRestRotations.Clear();
         boneRestDir.Clear();
         restPoseCaptured = false;
 
-        if (Character == null || Character.Bones == null)
+        if (actor == null || actor.Bones == null)
         {
-            Debug.LogWarning("[BlazeDataExtraction] Character is null, cannot capture rest pose.");
+            Debug.LogWarning("[BlazeDataExtraction] actor is null, cannot capture rest pose.");
             return;
         }
 
@@ -467,9 +480,9 @@ public class BlazeDataExtraction : RealTimeAnimation
         foreach (var kv in skel_bp.boneMap)
         {
             int boneIndex = kv.Value;
-            if (boneIndex < 0 || boneIndex >= Character.Bones.Length) continue;
+            if (boneIndex < 0 || boneIndex >= actor.Bones.Length) continue;
 
-            Transform t = Character.Bones[boneIndex].Transform;
+            Transform t = actor.Bones[boneIndex].Transform;
             boneRestRotations[boneIndex] = t.rotation;
         }
 
@@ -488,8 +501,8 @@ public class BlazeDataExtraction : RealTimeAnimation
 
             int childBone = skel_bp.boneMap[childBlaze];
 
-            Transform tParent = Character.Bones[parentBone].Transform;
-            Transform tChild = Character.Bones[childBone].Transform;
+            Transform tParent = actor.Bones[parentBone].Transform;
+            Transform tChild = actor.Bones[childBone].Transform;
 
             Vector3 dir = tChild.position - tParent.position;
             if (dir.sqrMagnitude < 1e-6f) continue;
@@ -518,6 +531,14 @@ public class BlazeDataExtraction : RealTimeAnimation
                 EnsureCapsulesExist(skel_build_bp);
             }
 
+            // 방어코드 추가
+            if (Characters == null || Characters.Count == 0)
+            {
+                Debug.LogWarning("[BlazeDataExtraction] Characters List is empty.");
+                b_play = false;
+                return;
+            }
+
             // initialize the data
             if (Frame >= _BlazeMotionData.frameDict.Count)
             {
@@ -528,14 +549,24 @@ public class BlazeDataExtraction : RealTimeAnimation
             {
                 Vector3[] currentPose = _BlazeMotionData.frameDict[Frame].ToArray();
 
-                //Debug.Log($" Frame : {Frame} , currentPose {currentPose[0]} / {currentPose.Length}");
-                UpdateBlazePose(skel_build_bp, currentPose);
+                // 모든 Actor에게 동일한 포즈 적용
+                foreach (var actor in Characters)
+                {
+                    if (actor == null) continue;
+                    UpdateBlazePose(skel_build_bp, actor, currentPose);
+                }
 
-                // Update Capsules // 
+                // joint 큐브는 한 세트만 쓰니까 그대로 유지
                 UpdateCubes(jointRoot, currentPose);
-                UpdateCapsules(skel_build_bp,Character);
-                
+
+                // 캡슐 시각화도 "대표 Actor 하나" 기준으로만
+                if (Characters.Count > 0 && Characters[0] != null)
+                {
+                    UpdateCapsules(skel_build_bp, Characters[0]);
+                }
+
                 Frame++;
+
             }
         }
 
@@ -609,25 +640,22 @@ public class BlazeDataExtraction : RealTimeAnimation
             Utility.ResetGUIColor();
             Utility.SetGUIColor(UltiDraw.LightGrey);
 
-            // Assigning Target Avatar
-            EditorGUILayout.BeginVertical();
-            Target.Character = (Actor)EditorGUILayout.ObjectField("Source Actor", Target.Character, typeof(Actor), true);
-            EditorGUILayout.EndVertical();
+            // Source Actors 리스트
+            SerializedObject so = serializedObject;
+            SerializedProperty charactersProp = so.FindProperty("Characters");
+            EditorGUILayout.PropertyField(charactersProp, new GUIContent("Source Actors"), true);
+            so.ApplyModifiedProperties();
 
+            // Blaze CSV 인스펙터 (대표 Actor 1명만 넘겨줌)
             if (Target._BlazeMotionData != null)
             {
-                //BlazeData
-                Target._BlazeMotionData.MotionCSVFile_Inspector(Target.Character);
+                Actor primary = (Target.Characters != null && Target.Characters.Count > 0)
+                    ? Target.Characters[0]
+                    : null;
+
+                Target._BlazeMotionData.MotionCSVFile_Inspector(primary);
             }
 
-            // // create_cubes
-            // Target.cube_scale = EditorGUILayout.FloatField("cube_scale", Target.cube_scale);
-            // if (Utility.GUIButton("Create Joint Cubes (33)", Color.white, Color.cyan))
-            // {
-            //    Target.CreateJointCubes(Target.cube_scale);
-            // }
-            
-            
             Target.capsuleRadius = EditorGUILayout.FloatField("bone_size", Target.capsuleRadius);
             Target.human_size_scale = EditorGUILayout.FloatField("human_scale", Target.human_size_scale);
 
@@ -641,50 +669,42 @@ public class BlazeDataExtraction : RealTimeAnimation
 
             EditorGUILayout.Space(10);
 
-            // if (Utility.GUIButton("Create BlazePose Actor (33)", Color.white, Color.cyan))
-            // {
-            //     Target.skel_build_bp.BuildActorSkeleton();
-            //     Target.Character = Target.skel_build_bp.actor;
-            //     Target.Character.DrawSkeleton = false;
-            //     Debug.Log($"Target Character : {Target.Character.Bones.Length}");
-            // }
-
-            // if (Utility.GUIButton("build capsules", Color.white, Color.red))
-            // {
-            //     Target.BuildCapsules(Target.skel_build_bp);
-            // }
-
-            //// play button
-            //if (Utility.GUIButton("reset & play animation", Color.white, Color.red))
-            //{
-            //    Target.skel_build_bp.BuildMapping(Target.Character);
-            //    Target.Frame = Target.StartFrame;
-            //    Target.b_play = true;
-            //}
-
             // play button
             if (Utility.GUIButton("reset & play animation", Color.white, Color.red))
             {
-                if (Target.Character != null)
+                // 대표 Actor 하나 선택 (여러 명이면 0번)
+                Actor primary = (Target.Characters != null && Target.Characters.Count > 0)
+                    ? Target.Characters[0]
+                    : null;
+
+                if (primary != null)
                 {
-                    Animator anim = Target.Character.GetComponentInChildren<Animator>();
+                    Animator anim = primary.GetComponentInChildren<Animator>();
 
                     if (anim != null && anim.isHuman)
                     {
                         // 휴머노이드 캐릭터라면 자동 Humanoid 매핑 사용
-                        Target.skel_build_bp.BuildHumanoidMapping(Target.Character, anim);
+                        Target.skel_build_bp.BuildHumanoidMapping(primary, anim);
                     }
                     else
                     {
                         // 아니면 기존 매핑 사용
-                        Target.skel_build_bp.BuildMapping(Target.Character);
+                        Target.skel_build_bp.BuildMapping(primary);
                     }
                 }
+                else
+                {
+                    Debug.LogWarning("[BlazeDataExtraction_Editor] Source Actors 리스트가 비어 있습니다.");
+                }
+
+                // 새 클립 / 새 플레이마다 기준값 초기화
+                Target.basePelvisInitialized = false;
+                Target.actorBaseHipPositions.Clear();
+                Target.restPoseCaptured = false;
 
                 Target.Frame = Target.StartFrame;
                 Target.b_play = true;
             }
-
         }
 
     }

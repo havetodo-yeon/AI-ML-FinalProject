@@ -7,7 +7,7 @@ url = "https://www.youtube.com/shorts/t2_yCI_ftpI"
 yt = YouTube(url)
 stream = yt.streams.filter(progressive=True, file_extension='mp4').first()
 
-out_dir = "C:/Users/kdy04/CAU/3-2/AL_ML/AI_ML_FinalProject/AI_ML_blazepose/videos"
+out_dir = "./videos"
 os.makedirs(out_dir, exist_ok=True)
 video_path = stream.download(output_path=out_dir)
 

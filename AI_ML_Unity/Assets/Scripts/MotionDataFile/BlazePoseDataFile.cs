@@ -1,10 +1,10 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
-using UnityEngine;
 using UnityEditor;
-using UnityEngine.SceneManagement;
 using UnityEditor.SceneManagement;
+using UnityEngine;
+using UnityEngine.SceneManagement;
 using UnityEngine.TextCore.Text;
 using UnityEngine.VFX;
 
@@ -18,6 +18,58 @@ public class BlazePoseDataFile : ScriptableObject
     public int selectedData = 0;
 
     public Dictionary<int, List<Vector3>> frameDict;
+
+    // 기본 CSV 폴더 경로.. 그냥 절대경로로 함
+    public string defaultCsvFolderPath = @"C:\Users\KDY\CAU\3-2\AIML\AI-ML-FinalProject\AI_ML_blazepose";
+
+    private void OnEnable()
+    {
+        if (frameDict == null || frameDict.Count == 0)
+        {
+            AutoLoadLatestCSV();
+        }
+    }
+
+    // defaultCsvFolderPath에서 가장 최신 CSV 자동 로드
+    private void AutoLoadLatestCSV()
+    {
+        if (string.IsNullOrEmpty(defaultCsvFolderPath))
+        {
+            Debug.LogWarning("[AutoCSV] defaultCsvFolderPath 가 비어 있습니다.");
+            return;
+        }
+
+        if (!Directory.Exists(defaultCsvFolderPath))
+        {
+            Debug.LogError($"[AutoCSV] 폴더를 찾을 수 없습니다: {defaultCsvFolderPath}");
+            return;
+        }
+
+        string[] files = Directory.GetFiles(defaultCsvFolderPath, "*.csv");
+        if (files.Length == 0)
+        {
+            Debug.LogError($"[AutoCSV] CSV 파일이 없습니다: {defaultCsvFolderPath}");
+            return;
+        }
+
+        // 가장 최근에 수정된 CSV 선택
+        string latestFile = null;
+        System.DateTime latestTime = System.DateTime.MinValue;
+
+        foreach (var f in files)
+        {
+            var info = new FileInfo(f);
+            if (info.LastWriteTime > latestTime)
+            {
+                latestTime = info.LastWriteTime;
+                latestFile = f;
+            }
+        }
+
+        Debug.Log($"[AutoCSV] 최신 CSV 자동 로드: {latestFile}");
+        ImportCSVDataFromPath(latestFile, scale);
+    }
+
     public void MotionCSVFile_Inspector(Actor _actor)
     {
         Character = _actor;
@@ -100,12 +152,32 @@ public class BlazePoseDataFile : ScriptableObject
         return csvFileNameList.Count > 0;
     }
 
-    // CSV 파일 실제 읽기 (간단한 예시)
+// ✅ 인덱스 기반 버전: 기존 UI에서 사용하는 함수
     public void ImportCSVData(int index, float scale)
     {
         if (index < 0 || index >= csvFileNameList.Count) return;
 
         string filePath = csvFileNameList[index];
+        Debug.Log($"[CSV Loader] Importing: {filePath}");
+
+        ImportCSVDataFromPath(filePath, scale);
+    }
+
+    // ✅ 실제 CSV 파싱 로직: 경로만 주면 어디서든 재사용
+    private void ImportCSVDataFromPath(string filePath, float scale)
+    {
+        if (string.IsNullOrEmpty(filePath))
+        {
+            Debug.LogError("[CSV Loader] filePath 가 비어 있습니다.");
+            return;
+        }
+
+        if (!File.Exists(filePath))
+        {
+            Debug.LogError($"[CSV Loader] CSV 파일이 존재하지 않습니다: {filePath}");
+            return;
+        }
+
         Debug.Log($"[CSV Loader] Importing: {filePath}");
 
         try
@@ -118,7 +190,8 @@ public class BlazePoseDataFile : ScriptableObject
             int nJoint = 33;
             int nFrame = (lines.Length - 1) / nJoint; // 첫 줄은 헤더 제외
             Debug.Log($"nLines : {lines.Length} , nFrame : {nFrame}");
-            //
+
+            // (1) 단순 프레임별 리스트 생성
             for (int f = 0; f < nFrame; f++)
             {
                 List<Vector3> frame = new List<Vector3>();
@@ -147,10 +220,7 @@ public class BlazePoseDataFile : ScriptableObject
                 frameDict[f] = frame;
             }
 
-
-            //
-
-            // 첫 번째 줄은 헤더이므로 건너뛰기
+            // (2) frame, landmark 기반으로 다시 재구성
             for (int i = 1; i < lines.Length; i++)
             {
                 string line = lines[i].Trim();
@@ -185,31 +255,10 @@ public class BlazePoseDataFile : ScriptableObject
                 Vector3 first = frameDict[0][0];
                 Debug.Log($"Frame 0 -> Landmark 0 = {first}");
             }
-
-            // smoothing 추가
-            foreach (var key in frameDict.Keys)
-            {
-                for (int j = 0; j < 33; j++)
-                {
-                    // 프레임별 이동 평균 적용: 흔들림 보정
-                    Vector3 avg = Vector3.zero;
-                    int count = 0;
-                    for (int f = Mathf.Max(0, key - 2); f <= Mathf.Min(frameDict.Count - 1, key + 2); f++)
-                    {
-                        avg += frameDict[f][j];
-                        count++;
-                    }
-                    avg /= count;
-                    frameDict[key][j] = avg;
-                }
-            }
-
-
         }
         catch (System.Exception e)
         {
             Debug.LogError($"Failed to import CSV: {e.Message}");
         }
     }
-
 }
