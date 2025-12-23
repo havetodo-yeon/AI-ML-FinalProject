@@ -1,16 +1,11 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-//using System.Diagnostics;
 using System.IO;
 using System.Text;
 using Unity.VisualScripting;
 using UnityEditor;
-using UnityEditor.Experimental.GraphView;
-using UnityEditorInternal;
 using UnityEngine;
-using UnityEngine.TextCore.Text;
-//using System.Diagnostics;
 
 public class BlazeDataExtraction : RealTimeAnimation
 {
@@ -19,25 +14,40 @@ public class BlazeDataExtraction : RealTimeAnimation
     public BlazePoseDataFile _BlazeMotionData;
     public Actor Character;
 
-    // joint root cubes
-    public Transform jointRoot;
-    public float cube_scale = 0.02f;
     public float human_size_scale = 5f;
     public float bone_size = 0.12f;
 
-    public GameObject capsulePrefab;     // 기본 캡슐 프리팹
-    [SerializeField] 
-    public List<GameObject> capsules = new List<GameObject>();
-    public float capsuleRadius = 0.15f;
-
-
-    private List<GameObject> jointCubes = new List<GameObject>();
     public BlazePoseSkeletonBuilder skel_build_bp;
 
     // 회전 리타게팅용 캐시
     private Dictionary<int, Quaternion> boneRestRotations = new Dictionary<int, Quaternion>();
     private Dictionary<int, Vector3> boneRestDir = new Dictionary<int, Vector3>(); // 본이 바라보는 기본 방향
     private bool restPoseCaptured = false;
+
+    // Runtime Smoothing
+    [Range(0f, 1f)] public float pelvisPosSmooth = 0.25f;
+    [Range(0f, 1f)] public float pelvisRotSmooth = 0.25f;
+
+    private bool pelvisSmoothInit = false;
+    private Vector3 pelvisPosSmoothed;
+    private Quaternion pelvisRotSmoothed;
+
+    // CSV(Blaze) 기준 첫 프레임 pelvis (Unity 변환 후)
+    private bool basePelvisInitialized = false;
+    private Vector3 basePelvisPosBP = Vector3.zero;
+    private Quaternion basePelvisRotBP = Quaternion.identity;
+
+    // 씬에서 캐릭터가 "재생 시작 시" 서 있던 pelvis(=Bones[2]) 월드 위치/회전
+    private Vector3 basePelvisPosWorld = Vector3.zero;
+    private Quaternion basePelvisRotWorld = Quaternion.identity;
+
+    // Timeline World Offset
+    public Transform worldOffset;   // 타임라인에서 움직일 오브젝트 (월드 기준)
+
+    private bool offsetBaseInitialized = false;
+    private Vector3 offsetBasePosWorld = Vector3.zero;
+    private Quaternion offsetBaseRotWorld = Quaternion.identity;
+
 
     // Blaze index별로 "어느 자식을 보고 방향을 잡을지" 정의
     // (부모 Blaze → 자식 Blaze)
@@ -57,52 +67,84 @@ public class BlazeDataExtraction : RealTimeAnimation
 
     protected override void Setup()
     {
-        _BlazeMotionData = ScriptableObject.CreateInstance<BlazePoseDataFile>();
+        if (_BlazeMotionData == null)
+            _BlazeMotionData = ScriptableObject.CreateInstance<BlazePoseDataFile>();
+
+        if (skel_build_bp == null)
+            skel_build_bp = ScriptableObject.CreateInstance<BlazePoseSkeletonBuilder>();
+
         b_play = false;
-        cube_scale = 0.02f;
     }
+
     protected override void Close()
     {
 
     }
-    
+
+    public void PrepareForPlayback()
+    {
+        if (_BlazeMotionData == null)
+            _BlazeMotionData = ScriptableObject.CreateInstance<BlazePoseDataFile>();
+
+        if (skel_build_bp == null)
+            skel_build_bp = ScriptableObject.CreateInstance<BlazePoseSkeletonBuilder>();
+
+        // CSV 자동 로드 보장
+        _BlazeMotionData.EnsureLoaded();
+
+        if (_BlazeMotionData.frameDict == null || _BlazeMotionData.frameDict.Count == 0)
+        {
+            Debug.LogError("[BlazeDataExtraction] Motion data not loaded. BlazePoseDataFile.defaultCsvFolderPath 확인.");
+            return;
+        }
+
+        // 단일 캐릭터 방어
+        if (Character == null)
+        {
+            Debug.LogError("[BlazeDataExtraction] Character(Source Actor)가 null 입니다.");
+            return;
+        }
+
+        // 매핑 준비
+        Animator anim = Character.GetComponentInChildren<Animator>();
+        if (anim != null && anim.isHuman)
+            skel_build_bp.BuildHumanoidMapping(Character, anim);
+        else
+            skel_build_bp.BuildMapping(Character);
+
+        // 상태 초기화
+        restPoseCaptured = false;
+        Frame = StartFrame;
+
+        // v2 anchor reset
+        basePelvisInitialized = false;
+        pelvisSmoothInit = false;
+
+        offsetBaseInitialized = false;
+
+
+    }
+
+    public void PlayFromStart()
+    {
+        PrepareForPlayback();
+        basePelvisInitialized = false;
+        pelvisSmoothInit = false;
+        b_play = true;
+    }
+
+    public void StopPlayback()
+    {
+        b_play = false;
+    }
+
     //feed functions
     Vector3 ConvertBlazeToUnity(Vector3 bp)
     {
         // y축 반전, z축 방향 전환 (필요 시)
         return new Vector3(-bp.x, bp.y, -bp.z);
     }
-    public void UpdateCubes(Transform jointRoot, Vector3[] currentPose)
-    {
-        if (jointRoot == null)
-        {
-            Debug.LogWarning(" joint_root is null. Please assign it first.");
-            return;
-        }
 
-        if (currentPose == null || currentPose.Length == 0)
-        {
-            Debug.LogWarning("currentPose is empty.");
-            return;
-        }
-
-        // joint_root 아래의 자식들 중 joint_i 이름을 가진 오브젝트를 찾아 업데이트
-        for (int i = 0; i < currentPose.Length; i++)
-        {
-            Transform joint = jointRoot.Find($"joint_{i}");
-            if (joint != null)
-            {
-                Vector3 position_blaze_to_unity = ConvertBlazeToUnity(currentPose[i])*human_size_scale;
-                joint.localPosition = position_blaze_to_unity;
-                joint.transform.localScale = new Vector3(capsuleRadius, capsuleRadius, capsuleRadius);
-            
-            }
-            else
-            {
-                Debug.LogWarning($"⚠️ joint_{i} not found under {jointRoot.name}");
-            }
-        }
-    }
     public Quaternion ComputeRotation(Vector3[] worldJointPos)
     {
         // 1. compute forward
@@ -184,8 +226,84 @@ public class BlazeDataExtraction : RealTimeAnimation
         // 2) compute pelvis origin
         Matrix4x4 pelvis = Matrix4x4.identity;
         Vector3[] local_positions = new Vector3[currentPose.Length];
-        ComputeLocalPositions(worldJointPos,out pelvis,out local_positions);
-        Character.Bones[2].Transform.SetPositionAndRotation(pelvis.GetPosition(),pelvis.rotation);
+        //ComputeLocalPositions(worldJointPos,out pelvis,out local_positions);
+        //Character.Bones[2].Transform.SetPositionAndRotation(pelvis.GetPosition(),pelvis.rotation);
+        ComputeLocalPositions(worldJointPos, out pelvis, out local_positions);
+
+        Vector3 pPos = pelvis.GetPosition();
+        Quaternion pRot = pelvis.rotation;
+
+        // ===== "첫 프레임 pelvis" 기준으로 Δpos/Δrot 만들고
+        //          "재생 시작 시 캐릭터 pelvis"에 더해서 월드 타겟을 만든다. =====
+        if (!basePelvisInitialized)
+        {
+            basePelvisInitialized = true;
+
+            // CSV 기준 첫 pelvis (Unity 변환된 좌표계)
+            basePelvisPosBP = pPos;
+            basePelvisRotBP = pRot;
+
+            // 씬에서 캐릭터가 시작할 때 서 있던 pelvis(=Bones[2]) 월드 위치/회전
+            basePelvisPosWorld = Character.Bones[2].Transform.position;
+            basePelvisRotWorld = Character.Bones[2].Transform.rotation;
+        }
+
+        // CSV 기준 상대 이동/회전(첫 프레임 대비)
+        Vector3 deltaPosBP = pPos - basePelvisPosBP;
+        Quaternion deltaRotBP = Quaternion.Inverse(basePelvisRotBP) * pRot;
+
+        // 최종 타겟 월드 pelvis = (씬 시작 pelvis) + Δ
+        Vector3 targetPelvisPosWorld = basePelvisPosWorld + deltaPosBP;
+        Quaternion targetPelvisRotWorld = basePelvisRotWorld * deltaRotBP;
+
+        // Timeline World Offset (delta)
+        Vector3 offsetDeltaPos = Vector3.zero;
+        Quaternion offsetDeltaRot = Quaternion.identity;
+
+        if (worldOffset != null)
+        {
+            if (!offsetBaseInitialized)
+            {
+                offsetBaseInitialized = true;
+                offsetBasePosWorld = worldOffset.position;
+                offsetBaseRotWorld = worldOffset.rotation;
+            }
+
+            offsetDeltaPos = worldOffset.position - offsetBasePosWorld;
+            offsetDeltaRot = Quaternion.Inverse(offsetBaseRotWorld) * worldOffset.rotation;
+        }
+
+        // 최종 타겟(오프셋 포함)
+        Vector3 finalTargetPos = targetPelvisPosWorld + offsetDeltaPos;
+        Quaternion finalTargetRot = offsetDeltaRot * targetPelvisRotWorld;
+
+        // smoothing (타겟 월드 pelvis를 부드럽게)
+        if (!pelvisSmoothInit)
+        {
+            pelvisSmoothInit = true;
+            pelvisPosSmoothed = finalTargetPos;
+            pelvisRotSmoothed = finalTargetRot;
+        }
+        else
+        {
+            pelvisPosSmoothed = Vector3.Lerp(
+                pelvisPosSmoothed,
+                finalTargetPos,
+                1f - Mathf.Pow(1f - pelvisPosSmooth, 60f * Time.deltaTime)
+            );
+
+            pelvisRotSmoothed = Quaternion.Slerp(
+                pelvisRotSmoothed,
+                finalTargetRot,
+                1f - Mathf.Pow(1f - pelvisRotSmooth, 60f * Time.deltaTime)
+            );
+        }
+
+        // 스무딩된 월드 pelvis 적용
+        Character.Bones[2].Transform.SetPositionAndRotation(pelvisPosSmoothed, pelvisRotSmoothed);
+
+        // 이후 bone 적용에서 쓰는 pelvis 회전도 "월드 pelvis"로 통일
+        pelvis.SetTRS(pelvisPosSmoothed, pelvisRotSmoothed, pelvis.GetScale());
 
         // 3) 각 본의 회전을 방향 벡터 기반으로 갱신
         foreach (var kv in skel_bp.boneMap)
@@ -204,20 +322,21 @@ public class BlazeDataExtraction : RealTimeAnimation
                 !boneRestDir.ContainsKey(parentBone))
                 continue;
 
-            // BlazePose 기준 현재 방향 (부모 -> 자식)
-            Vector3 targetDir = worldJointPos[childBlaze] - worldJointPos[parentBlaze];
+            // pelvis-local 기준 방향
+            Vector3 targetDir = local_positions[childBlaze] - local_positions[parentBlaze];
             if (targetDir.sqrMagnitude < 1e-6f) continue;
             targetDir.Normalize();
 
-            // 캐릭터 기본 포즈에서의 방향 / 회전
+            // restDir/restRot은 pelvis-local이어야 함 (아래 CaptureRestPose도 같이 바꿀 것)
             Vector3 restDir = boneRestDir[parentBone];
             Quaternion restRot = boneRestRotations[parentBone];
 
-            // 기본 방향 -> 현재 방향으로 회전 델타 계산
-            Quaternion delta = Quaternion.FromToRotation(pelvis.rotation * restDir, targetDir);
-            
-            // 최종 회전 = 델타 * 기본 회전
-            Character.Bones[parentBone].Transform.rotation = delta * pelvis.rotation * restRot;
+            // local에서 delta
+            Quaternion delta = Quaternion.FromToRotation(restDir, targetDir);
+
+            // 최종: "월드 pelvis" * (local bone rot)
+            Quaternion finalWorldRot = pelvis.rotation * (delta * restRot);
+            Character.Bones[parentBone].Transform.rotation = finalWorldRot;
         }
     }
 
@@ -271,132 +390,6 @@ public class BlazeDataExtraction : RealTimeAnimation
         UltiDraw.End();
     }
     
-    // Capsule visualization
-    public void BuildCapsules(BlazePoseSkeletonBuilder skel_bp)
-    {
-        // 이전 캡슐 제거
-        foreach (var cap in capsules)
-            DestroyImmediate(cap);
-        capsules.Clear();
-
-        if (capsulePrefab == null)
-        {
-            capsulePrefab = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-            capsulePrefab.name = "CapsulePrefab";
-            capsulePrefab.SetActive(true); // 템플릿용
-        }
-
-        GameObject capsuleRoot = new GameObject("Capsules");
-        // 캡슐 생성
-        for (int i = 0; i < skel_bp.blazePoseBones.GetLength(0); i++)
-        {
-            GameObject capsule = Instantiate(capsulePrefab, capsuleRoot.transform);
-            capsule.name = $"Capsule_{i}";
-            capsule.transform.localScale = new Vector3(capsuleRadius, 0.05f, capsuleRadius);
-            capsules.Add(capsule);
-        }
-    }
-
-    public void EnsureCapsulesExist(BlazePoseSkeletonBuilder skel_bp)
-    {
-        if (capsules == null)
-            capsules = new List<GameObject>();
-
-        // 리스트 길이, null 요소까지 모두 체크해서 이상하면 재빌드
-        bool needRebuild = false;
-
-        int expectedCount = skel_bp.blazePoseBones.GetLength(0);
-
-        if (capsules.Count != expectedCount)
-        {
-            needRebuild = true;
-        }
-        else
-        {
-            for (int i = 0; i < capsules.Count; i++)
-            {
-                if (capsules[i] == null)
-                {
-                    needRebuild = true;
-                    break;
-                }
-            }
-        }
-
-        if (needRebuild)
-        {
-            Debug.Log("Capsules are missing or invalid — rebuilding.");
-            BuildCapsules(skel_build_bp);
-        }
-        else
-        {
-            Debug.Log("Using existing capsules from Inspector.");
-        }
-    }
-
-
-    public void UpdateCapsules(BlazePoseSkeletonBuilder skel_bp, Actor actor)
-    {
-        // 안전장치
-        if (skel_bp == null || skel_bp.boneMap == null) return;
-        if (capsules == null || capsules.Count == 0) return;
-
-        for (int i = 0; i < skel_bp.blazePoseBones.GetLength(0); i++)
-        {
-            int parent = skel_bp.blazePoseBones[i, 0];
-            int child = skel_bp.blazePoseBones[i, 1];
-
-            // boneMap에 인덱스가 없으면 그냥 스킵
-            if (!skel_bp.boneMap.ContainsKey(parent) ||
-                !skel_bp.boneMap.ContainsKey(child))
-            {
-                continue;
-            }
-
-            int map_parent = skel_bp.boneMap[parent];
-            int map_child = skel_bp.boneMap[child];
-
-            if (parent < 0 || parent >= actor.Bones.Length) continue;
-            if (child < 0 || child >= actor.Bones.Length) continue;
-            if (actor.Bones[map_parent] == null || actor.Bones[map_child] == null) continue;
-
-            // 캡슐 null 체크 방어코드
-            if (i >= capsules.Count || capsules[i] == null) continue;
-
-            Vector3 parentPos = actor.Bones[map_parent].Transform.position;
-            Vector3 childPos = actor.Bones[map_child].Transform.position;
-
-            bool isHand = false;
-            UpdateCapsuleTransform(capsules[i], parentPos, childPos, isHand);
-        }
-    }
-
-
-    // ============================
-    // ③ 캡슐 위치/회전 업데이트
-    // ============================
-    private void UpdateCapsuleTransform(GameObject capsule, Vector3 start, Vector3 end, bool isHand)
-    {
-        Vector3 offset = end - start;
-        Vector3 position = start + offset / 2.0f;
-        capsule.transform.position = position;
-        capsule.transform.rotation = Quaternion.FromToRotation(Vector3.up, offset);
-
-        float length = offset.magnitude;
-        capsule.transform.localScale = new Vector3(capsuleRadius, length / 2.0f + 0.03f, capsuleRadius);
-
-        if (isHand && capsule.transform.childCount > 0)
-        {
-            Transform hand = capsule.transform.GetChild(0);
-            if (hand != null)
-            {
-                hand.localScale = new Vector3(capsuleRadius, 1.0f, capsuleRadius);
-                hand.localRotation = Quaternion.FromToRotation(Vector3.up, offset);
-                hand.position = end;
-            }
-        }
-    }
-
     /// <summary>
     /// 캐릭터 T-pose 상태에서
     /// - 각 본의 기본 회전
@@ -408,6 +401,11 @@ public class BlazeDataExtraction : RealTimeAnimation
         boneRestRotations.Clear();
         boneRestDir.Clear();
         restPoseCaptured = false;
+
+        // pelvis 기준 (Bones[2]를 pelvis로 사용중)
+        Transform pelvisT = Character.Bones[2].Transform;
+        Quaternion pelvisRot0 = pelvisT.rotation;
+        Quaternion invPelvisRot0 = Quaternion.Inverse(pelvisRot0);
 
         if (Character == null || Character.Bones == null)
         {
@@ -428,7 +426,7 @@ public class BlazeDataExtraction : RealTimeAnimation
             if (boneIndex < 0 || boneIndex >= Character.Bones.Length) continue;
 
             Transform t = Character.Bones[boneIndex].Transform;
-            boneRestRotations[boneIndex] = t.rotation;
+            boneRestRotations[boneIndex] = invPelvisRot0 * t.rotation;
         }
 
         // 2) 각 본이 바라보는 방향 저장
@@ -449,11 +447,12 @@ public class BlazeDataExtraction : RealTimeAnimation
             Transform tParent = Character.Bones[parentBone].Transform;
             Transform tChild = Character.Bones[childBone].Transform;
 
-            Vector3 dir = tChild.position - tParent.position;
-            if (dir.sqrMagnitude < 1e-6f) continue;
-            dir.Normalize();
+            Vector3 dirWorld = tChild.position - tParent.position;
+            if (dirWorld.sqrMagnitude < 1e-6f) continue;
 
-            boneRestDir[parentBone] = dir;
+            Vector3 dirLocal = invPelvisRot0 * dirWorld;
+            dirLocal.Normalize();
+            boneRestDir[parentBone] = dirLocal;
         }
 
 
@@ -473,7 +472,6 @@ public class BlazeDataExtraction : RealTimeAnimation
             if (Frame == StartFrame)
             {
                 _BlazeMotionData.ImportCSVData(_BlazeMotionData.selectedData, 1.0f);
-                EnsureCapsulesExist(skel_build_bp);
             }
 
             // initialize the data
@@ -505,8 +503,38 @@ public class BlazeDataExtraction : RealTimeAnimation
     {
         //DrawBlazeSkel(skel_build_bp, bone_size, Color.cyan);
     }
-
     
+    public void Prepare()
+    {
+        // 런타임에서 누락되는 것들 보정
+        if (_BlazeMotionData == null)
+            _BlazeMotionData = ScriptableObject.CreateInstance<BlazePoseDataFile>();
+
+        if (skel_build_bp == null)
+            skel_build_bp = ScriptableObject.CreateInstance<BlazePoseSkeletonBuilder>();
+
+        if (Character == null)
+        {
+            Debug.LogError("[BlazeDataExtraction] Character(Source Actor)가 null 입니다.");
+            return;
+        }
+
+        // Humanoid 매핑 준비
+        Animator anim = Character.GetComponentInChildren<Animator>();
+        if (anim != null && anim.isHuman)
+            skel_build_bp.BuildHumanoidMapping(Character, anim);
+        else
+            skel_build_bp.BuildMapping(Character);
+
+        // RestPose 다시 캡처하게
+        // (private라면 bool만 초기화하는 방식으로 둬도 됨)
+        // restPoseCaptured = false; // <- 현재 필드가 private 이지만 같은 클래스 내부니까 OK
+        restPoseCaptured = false;
+
+        // 시작 프레임으로 리셋
+        Frame = StartFrame;
+    }
+
     [CustomEditor(typeof(BlazeDataExtraction), true)]
     public class BlazeDataExtraction_Editor : Editor
     {
@@ -538,6 +566,19 @@ public class BlazeDataExtraction : RealTimeAnimation
             }
 
             Target.human_size_scale = EditorGUILayout.FloatField("human_scale", Target.human_size_scale);
+            
+            EditorGUILayout.Space(5);
+            EditorGUILayout.LabelField("Timeline World Offset (optional)", EditorStyles.boldLabel);
+            Target.worldOffset = (Transform)EditorGUILayout.ObjectField(
+                "World Offset Transform",
+                Target.worldOffset,
+                typeof(Transform),
+                true
+            );
+            //if (GUI.changed)
+            //{
+            //    EditorUtility.SetDirty(Target);
+            //}
 
             EditorGUILayout.Space(10);
 

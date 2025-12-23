@@ -18,6 +18,27 @@ public class BlazePoseDataFile : ScriptableObject
     public int selectedData = 0;
 
     public Dictionary<int, List<Vector3>> frameDict;
+
+    [Header("Smoothing")]
+    public bool enableSmoothing = true;
+    [Range(0, 10)] public int smoothingRadius = 2; // 2면 총 5프레임 평균
+
+    // 외부에서 확실히 로드 보장 (Timeline/런타임에서 호출)
+    public void EnsureLoaded()
+    {
+        if (frameDict == null || frameDict.Count == 0)
+        {
+            AutoLoadLatestCSV();
+        }
+    }
+
+    //외부에서 특정 경로로 강제 로드하고 싶을 때
+    public void LoadFromPath(string filePath, float scaleOverride = 1.0f)
+    {
+        scale = scaleOverride;
+        ImportCSVDataFromPath(filePath, scale);
+    }
+
     public void MotionCSVFile_Inspector(Actor _actor)
     {
         Character = _actor;
@@ -69,7 +90,7 @@ public class BlazePoseDataFile : ScriptableObject
                 EditorGUILayout.LabelField("Selected File: " + csvFileNameList[selectedData], GUILayout.Width(550));
             }
             // selectedData = EditorGUILayout.Popup(selectedData, csvFileNameList.ToArray(),
-            // GUILayout.ExpandWidth(true),  // ✅ 폭 자동 확장
+            // GUILayout.ExpandWidth(true),  // 폭 자동 확장
             // GUILayout.MinWidth(150)       // 최소 폭 확보
             // );
             EditorGUILayout.EndHorizontal();
@@ -177,7 +198,7 @@ public class BlazePoseDataFile : ScriptableObject
                 frameDict[frame][landmark] = position;
             }
 
-            Debug.Log($"✅ Imported {frameDict.Count} frames of motion data");
+            Debug.Log($"Imported {frameDict.Count} frames of motion data");
 
             // 예시 출력: 첫 번째 프레임의 0번 랜드마크
             if (frameDict.ContainsKey(0))
@@ -211,5 +232,156 @@ public class BlazePoseDataFile : ScriptableObject
             Debug.LogError($"Failed to import CSV: {e.Message}");
         }
     }
+    // 기본 CSV 폴더 경로
+    public string defaultCsvFolderPath = @"C:\Users\KDY\CAU\3-2\AIML\AI-ML-FinalProject\AI_ML_Python_Final\final_project\data\output";
+
+    // defaultCsvFolderPath에서 가장 최신 CSV 자동 로드
+    private void AutoLoadLatestCSV()
+    {
+        if (string.IsNullOrEmpty(defaultCsvFolderPath))
+        {
+            Debug.LogWarning("[AutoCSV] defaultCsvFolderPath 가 비어 있습니다.");
+            return;
+        }
+
+        if (!Directory.Exists(defaultCsvFolderPath))
+        {
+            Debug.LogError($"[AutoCSV] 폴더를 찾을 수 없습니다: {defaultCsvFolderPath}");
+            return;
+        }
+
+        string[] files = Directory.GetFiles(defaultCsvFolderPath, "*.csv");
+        if (files.Length == 0)
+        {
+            Debug.LogError($"[AutoCSV] CSV 파일이 없습니다: {defaultCsvFolderPath}");
+            return;
+        }
+
+        string latestFile = null;
+        System.DateTime latestTime = System.DateTime.MinValue;
+
+        foreach (var f in files)
+        {
+            var info = new FileInfo(f);
+            if (info.LastWriteTime > latestTime)
+            {
+                latestTime = info.LastWriteTime;
+                latestFile = f;
+            }
+        }
+
+        Debug.Log($"[AutoCSV] 최신 CSV 자동 로드: {latestFile}");
+        ImportCSVDataFromPath(latestFile, scale);
+    }
+
+    // 실제 CSV 파싱 로직: 경로만 주면 어디서든 재사용
+    private void ImportCSVDataFromPath(string filePath, float scale)
+    {
+        if (string.IsNullOrEmpty(filePath))
+        {
+            Debug.LogError("[CSV Loader] filePath 가 비어 있습니다.");
+            return;
+        }
+
+        if (!File.Exists(filePath))
+        {
+            Debug.LogError($"[CSV Loader] CSV 파일이 존재하지 않습니다: {filePath}");
+            return;
+        }
+
+        Debug.Log($"[CSV Loader] Importing: {filePath}");
+
+        try
+        {
+            string[] lines = File.ReadAllLines(filePath);
+
+            frameDict = new Dictionary<int, List<Vector3>>();
+
+            int nJoint = 33;
+            int nFrame = (lines.Length - 1) / nJoint;
+            Debug.Log($"nLines : {lines.Length} , nFrame : {nFrame}");
+
+            // frame, landmark 기반 재구성
+            for (int i = 1; i < lines.Length; i++)
+            {
+                string line = lines[i].Trim();
+                if (string.IsNullOrEmpty(line)) continue;
+
+                string[] values = line.Split(',');
+                if (values.Length < 6) continue;
+
+                int frame = int.Parse(values[0]);
+                int landmark = int.Parse(values[1]);
+                float x = float.Parse(values[2]);
+                float y = float.Parse(values[3]);
+                float z = float.Parse(values[4]);
+
+                Vector3 position = new Vector3(x * scale, y * scale, z * scale);
+
+                if (!frameDict.ContainsKey(frame))
+                    frameDict[frame] = new List<Vector3>(new Vector3[33]);
+
+                frameDict[frame][landmark] = position;
+            }
+
+            Debug.Log($"Imported {frameDict.Count} frames of motion data");
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"Failed to import CSV: {e.Message}");
+        }
+
+        // smoothing 추가 (AutoLoadLatestCSV 경로에서도 적용되게)
+        if (enableSmoothing && frameDict != null && frameDict.Count > 0)
+        {
+            ApplyMovingAverageSmoothing(frameDict, smoothingRadius);
+        }
+
+    }
+
+    private void ApplyMovingAverageSmoothing(Dictionary<int, List<Vector3>> data, int radius)
+    {
+        if (radius <= 0) return;
+
+        int frameCount = data.Count;
+        if (frameCount == 0) return;
+
+        // key가 0..N-1로 연속이라는 가정(네 CSV 구조상 보통 맞음)
+        // 혹시 비연속이면 keys 정렬해서 인덱싱으로 바꿔도 됨.
+        var smoothed = new Dictionary<int, List<Vector3>>(frameCount);
+
+        for (int f = 0; f < frameCount; f++)
+        {
+            // 원본 프레임이 없으면 스킵
+            if (!data.ContainsKey(f) || data[f] == null || data[f].Count < 33) continue;
+
+            var outFrame = new List<Vector3>(new Vector3[33]);
+
+            for (int j = 0; j < 33; j++)
+            {
+                Vector3 sum = Vector3.zero;
+                int count = 0;
+
+                int f0 = Mathf.Max(0, f - radius);
+                int f1 = Mathf.Min(frameCount - 1, f + radius);
+
+                for (int k = f0; k <= f1; k++)
+                {
+                    if (!data.ContainsKey(k) || data[k] == null || data[k].Count < 33) continue;
+                    sum += data[k][j];
+                    count++;
+                }
+
+                outFrame[j] = (count > 0) ? (sum / count) : data[f][j];
+            }
+
+            smoothed[f] = outFrame;
+        }
+
+        // 결과 덮어쓰기
+        foreach (var kv in smoothed)
+            data[kv.Key] = kv.Value;
+    }
+
 
 }
