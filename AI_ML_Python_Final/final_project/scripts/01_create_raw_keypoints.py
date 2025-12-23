@@ -16,6 +16,7 @@ RAW_TEST_DIR = os.path.join(ROOT, "data", "test_keypoints")
 
 os.makedirs(RAW_VIDEO_DIR, exist_ok=True)
 os.makedirs(RAW_KEYPOINT_DIR, exist_ok=True)
+os.makedirs(RAW_TEST_DIR, exist_ok=True)
 
 mp_pose = mp.solutions.pose
 pose_model = mp_pose.Pose(
@@ -27,10 +28,43 @@ pose_model = mp_pose.Pose(
     min_tracking_confidence=0.5
 )
 
+def sanitize_filename(filename):
+    """Windows에서 허용되지 않는 문자를 제거하거나 대체합니다."""
+    # Windows에서 허용되지 않는 문자: < > : " / \ | ? *
+    invalid_chars = '<>:"/\\|?*'
+    
+    # 비표준 따옴표 및 특수 문자를 언더스코어로 변경
+    filename = filename.replace("'", "_").replace("'", "_").replace("'", "_")
+    filename = filename.replace(""", "_").replace(""", "_")
+    
+    # 허용되지 않는 문자 제거
+    for char in invalid_chars:
+        filename = filename.replace(char, "_")
+    
+    # 공백을 언더스코어로 변경
+    filename = filename.replace(" ", "_")
+    
+    # 연속된 언더스코어를 하나로
+    while "__" in filename:
+        filename = filename.replace("__", "_")
+    
+    # 앞뒤 언더스코어 제거
+    filename = filename.strip("_")
+    
+    # 빈 문자열이면 기본값 사용
+    if not filename:
+        filename = "video"
+    
+    # Windows 파일명 길이 제한 (255자)
+    if len(filename) > 200:
+        filename = filename[:200]
+    
+    return filename
+
 def download_youtube(url):
     yt = YouTube(url)
-    name = yt.title.replace(" ", "_").replace("/", "_")
-    filepath = f"{RAW_VIDEO_DIR}/{name}.mp4"
+    name = sanitize_filename(yt.title)
+    filepath = os.path.join(RAW_VIDEO_DIR, f"{name}.mp4")
     yt.streams.filter(file_extension='mp4').first().download(
         output_path=RAW_VIDEO_DIR,
         filename=f"{name}.mp4"
@@ -40,6 +74,9 @@ def download_youtube(url):
 
 
 def extract_3d_keypoints(video_path, dir_path =RAW_KEYPOINT_DIR, name ="Data"):
+    # 파일명도 정리 (혹시 모를 경우를 대비)
+    name = sanitize_filename(name)
+    
     cap = cv2.VideoCapture(video_path)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     pose_rows = []
@@ -78,13 +115,13 @@ def extract_3d_keypoints(video_path, dir_path =RAW_KEYPOINT_DIR, name ="Data"):
 
     # extract local positions from pelvis
 
-
-    out_path = f"{dir_path}/{name}.npz"
+    # 경로도 os.path.join을 사용하여 안전하게 생성
+    out_path = os.path.join(dir_path, f"{name}.npz")
     np.savez(out_path, data=df.to_numpy())
     print(f"📌 Saved 3D keypoints → {out_path}")
 
 def main():
-    video_path, name = download_youtube('https://youtube.com/shorts/Xuzazm0VAik?si=2ugZmNk6XtKHCkxe')
+    video_path, name = download_youtube('https://www.youtube.com/shorts/jkyfropXop0')
     extract_3d_keypoints(video_path, RAW_KEYPOINT_DIR, name)
     # TODO : URL list to download various motion dataset.
     # url_list
